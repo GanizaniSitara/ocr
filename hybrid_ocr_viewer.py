@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
-Hybrid OCR viewer: OpenAI Vision for covers, analytical OCR for content pages.
-Uses the UX paradigm with caching and toggleable overlays.
+Hybrid OCR viewer: Multiple OCR methods with intelligent selection.
+Supports local-only mode (Tesseract) and AI-enhanced mode (OpenAI/Claude).
+Uses caching and toggleable overlays for interactive text extraction.
 """
 
 import base64
@@ -39,31 +40,31 @@ def encode_image(image_path):
 
 
 def extract_text_with_openai(client, image_path):
-    """Extract text using OpenAI Vision with position estimation (for covers)."""
+    """Extract text using OpenAI Vision with position estimation (for complex layouts)."""
     
     try:
         base64_image = encode_image(image_path)
         
-        prompt = """Analyze this magazine cover and extract ALL visible text with approximate positions.
+        prompt = """Analyze this image and extract ALL visible text with approximate positions.
 
 For each piece of text you find, provide:
 1. The exact text content
 2. Approximate position as percentage from top-left (0-100% for both x and y)
 3. Approximate size (small/medium/large)
-4. Text type (masthead/headline/caption/speech_bubble/price/date/other)
+4. Text type (title/headline/caption/speech_bubble/button/label/menu/other)
 
 Format your response as a JSON array like this:
 [
   {
-    "text": "PRIVATE EYE",
-    "x_percent": 50,
-    "y_percent": 15,
-    "size": "large",
-    "type": "masthead"
+    "text": "File",
+    "x_percent": 10,
+    "y_percent": 5,
+    "size": "medium",
+    "type": "menu"
   }
 ]
 
-Be thorough - extract ALL text including titles, headlines, speech bubbles, prices, dates."""
+Be thorough - extract ALL text including titles, headers, buttons, labels, captions, and any other visible text."""
 
         response = client.chat.completions.create(
             model="gpt-4o",
@@ -106,18 +107,18 @@ Be thorough - extract ALL text including titles, headlines, speech bubbles, pric
         return []
 
 
-def extract_text_with_analytical_ocr(image_path):
-    """Extract text using analytical OCR with bounding boxes (for content pages)."""
+def extract_text_with_analytical_ocr(image_path, psm_mode=3):
+    """Extract text using analytical OCR with bounding boxes (for dense text content)."""
     
     try:
-        print(f"Using analytical OCR for content page: {image_path}")
+        print(f"Using analytical OCR (PSM {psm_mode}) for: {image_path}")
         
         # Load image
         image = Image.open(image_path)
         image_width, image_height = image.size
         
-        # Use optimal PSM for content pages
-        config = "--psm 3 --oem 3"  # The configuration that worked well
+        # Use specified PSM mode with LSTM engine
+        config = f"--psm {psm_mode} --oem 3"
         
         # Get HOCR output with bounding boxes
         hocr_output = pytesseract.image_to_pdf_or_hocr(image, config=config, extension='hocr')
@@ -166,7 +167,7 @@ def extract_text_with_analytical_ocr(image_path):
                             "x_percent": x_percent,
                             "y_percent": y_percent,
                             "size": size,
-                            "type": "content",
+                            "type": "text",
                             "confidence": confidence,
                             "bbox": coords
                         })
@@ -176,6 +177,42 @@ def extract_text_with_analytical_ocr(image_path):
         
     except Exception as e:
         print(f"Error in analytical OCR: {e}")
+        return []
+
+
+def extract_text_with_local_ocr_enhanced(image_path):
+    """Enhanced local OCR using multiple PSM modes for better coverage."""
+    
+    try:
+        print(f"Using enhanced local OCR for: {image_path}")
+        
+        # Try multiple PSM modes and combine results
+        psm_modes = [
+            (11, "sparse"),     # Best for scattered UI elements
+            (6, "block"),       # Good for text blocks  
+            (3, "auto"),        # Standard automatic
+        ]
+        
+        all_results = []
+        seen_text = set()
+        
+        for psm, description in psm_modes:
+            results = extract_text_with_analytical_ocr(image_path, psm)
+            
+            # Add unique results only
+            for result in results:
+                text_key = result['text'].lower().strip()
+                if text_key not in seen_text:
+                    result['psm_mode'] = psm
+                    result['psm_description'] = description
+                    all_results.append(result)
+                    seen_text.add(text_key)
+        
+        print(f"Enhanced local OCR extracted {len(all_results)} unique text elements")
+        return all_results
+        
+    except Exception as e:
+        print(f"Error in enhanced local OCR: {e}")
         return []
 
 
@@ -201,24 +238,26 @@ def parse_text_manually(response_text):
     return results
 
 
-def is_cover_page(image_path):
-    """Determine if this is a cover page or content page."""
+def is_complex_layout(image_path):
+    """Determine if this image has complex layout requiring AI analysis."""
     image_name = Path(image_path).name.lower()
     
-    # Heuristics for cover pages
-    cover_indicators = [
-        '000',  # Often first page
+    # Heuristics for complex layouts (covers, posters, mixed content)
+    complex_indicators = [
+        '000',      # Often cover/title pages
         'cover',
-        'front'
+        'front',
+        'poster',
+        'title'
     ]
     
-    # Check if it's the first file (sorted)
+    # Check if it's the first file (sorted) - often covers/title pages
     png_files = sorted(list(Path(image_path).parent.glob("*.png")))
     if png_files and str(png_files[0]) == str(image_path):
         return True
     
     # Check filename patterns
-    for indicator in cover_indicators:
+    for indicator in complex_indicators:
         if indicator in image_name:
             return True
     
@@ -251,7 +290,7 @@ def save_cached_results():
         print(f"Error saving cache: {e}")
 
 
-def process_image(image_path, force_reprocess=False):
+def process_image(image_path, force_reprocess=False, local_only=False):
     """Process image with appropriate OCR method and store results."""
     
     image_name = Path(image_path).name
@@ -262,18 +301,22 @@ def process_image(image_path, force_reprocess=False):
         return processed_images[image_name]
     
     # Determine processing method
-    if is_cover_page(image_path):
-        print(f"Detected cover page - using OpenAI Vision: {image_name}")
+    if local_only:
+        print(f"Local-only mode - using enhanced Tesseract OCR: {image_name}")
+        text_data = extract_text_with_local_ocr_enhanced(image_path)
+        method = "enhanced_local_ocr"
+    elif is_complex_layout(image_path):
+        print(f"Detected complex layout - attempting AI Vision: {image_name}")
         client = setup_openai()
         if not client:
-            print("OpenAI not available, falling back to analytical OCR")
-            text_data = extract_text_with_analytical_ocr(image_path)
-            method = "analytical_ocr_fallback"
+            print("AI not available, using enhanced local OCR")
+            text_data = extract_text_with_local_ocr_enhanced(image_path)
+            method = "enhanced_local_ocr_fallback"
         else:
             text_data = extract_text_with_openai(client, image_path)
             method = "openai_vision"
     else:
-        print(f"Detected content page - using analytical OCR: {image_name}")
+        print(f"Detected standard layout - using analytical OCR: {image_name}")
         text_data = extract_text_with_analytical_ocr(image_path)
         method = "analytical_ocr"
     
@@ -347,8 +390,10 @@ def create_templates():
             border-radius: 5px; 
             border-left: 4px solid #007bff;
         }
-        .image-item.openai { border-left-color: #28a745; }
-        .image-item.analytical { border-left-color: #ffc107; }
+        .image-item.openai-vision { border-left-color: #28a745; }
+        .image-item.analytical-ocr { border-left-color: #ffc107; }
+        .image-item.enhanced-local-ocr { border-left-color: #6f42c1; }
+        .image-item.enhanced-local-ocr-fallback { border-left-color: #6c757d; }
         .image-item a { text-decoration: none; color: #007bff; font-weight: bold; }
         .image-item a:hover { color: #0056b3; }
         .stats { color: #666; font-size: 0.9em; margin-top: 5px; }
@@ -359,14 +404,16 @@ def create_templates():
             font-size: 0.8em; 
             font-weight: bold; 
         }
-        .method-openai { background: #d4edda; color: #155724; }
-        .method-analytical { background: #fff3cd; color: #856404; }
+        .method-openai-vision { background: #d4edda; color: #155724; }
+        .method-analytical-ocr { background: #fff3cd; color: #856404; }
+        .method-enhanced-local-ocr { background: #e2d9f3; color: #6f42c1; }
+        .method-enhanced-local-ocr-fallback { background: #e9ecef; color: #6c757d; }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>Hybrid OCR Text Extractor</h1>
-        <div class="subtitle">OpenAI Vision for covers • Analytical OCR for content pages</div>
+        <div class="subtitle">AI Vision for complex layouts • Enhanced Tesseract for standard content</div>
         
         {% if images %}
         <h2>Processed Images:</h2>
@@ -410,7 +457,8 @@ def create_templates():
         }
         .method-openai-vision { background: #d4edda; color: #155724; }
         .method-analytical-ocr { background: #fff3cd; color: #856404; }
-        .method-analytical-ocr-fallback { background: #f8d7da; color: #721c24; }
+        .method-enhanced-local-ocr { background: #e2d9f3; color: #6f42c1; }
+        .method-enhanced-local-ocr-fallback { background: #e9ecef; color: #6c757d; }
         
         .controls { text-align: center; margin-bottom: 15px; }
         .toggle-btn {
@@ -462,13 +510,13 @@ def create_templates():
         .text-overlay.size-medium { font-size: 12px; }
         .text-overlay.size-large { font-size: 16px; }
         
-        .text-overlay.type-masthead { color: #ffffff; background: rgba(255,0,0,0.8); }
+        .text-overlay.type-title { color: #ffffff; background: rgba(255,0,0,0.8); }
         .text-overlay.type-headline { color: #ffffff; background: rgba(255,102,0,0.8); }
-        .text-overlay.type-speech_bubble { color: #ffffff; background: rgba(0,102,255,0.8); }
-        .text-overlay.type-caption { color: #ffffff; background: rgba(0,153,0,0.8); }
-        .text-overlay.type-price { color: #ffffff; background: rgba(204,0,153,0.8); }
-        .text-overlay.type-date { color: #ffffff; background: rgba(102,102,0,0.8); }
-        .text-overlay.type-content { color: #000000; background: rgba(255,255,255,0.7); }
+        .text-overlay.type-button { color: #ffffff; background: rgba(0,102,255,0.8); }
+        .text-overlay.type-label { color: #ffffff; background: rgba(0,153,0,0.8); }
+        .text-overlay.type-menu { color: #ffffff; background: rgba(204,0,153,0.8); }
+        .text-overlay.type-caption { color: #ffffff; background: rgba(102,102,0,0.8); }
+        .text-overlay.type-text { color: #000000; background: rgba(255,255,255,0.7); }
         .text-overlay.type-other { color: #ffffff; background: rgba(51,51,51,0.8); }
         
         .text-overlay:hover {
@@ -667,6 +715,7 @@ def main():
     parser = argparse.ArgumentParser(description='Hybrid OCR Interactive Viewer')
     parser.add_argument('--reprocess', action='store_true', help='Force reprocessing of all images')
     parser.add_argument('--cache-only', action='store_true', help='Only use cached results, no new processing')
+    parser.add_argument('--local-only', action='store_true', help='Use only local Tesseract OCR (no AI APIs)')
     parser.add_argument('--content-page', help='Specific content page to process (e.g., 033)')
     args = parser.parse_args()
     
@@ -706,29 +755,29 @@ def main():
             else:
                 print(f"No files found matching '{args.content_page}'")
         else:
-            # Normal mode: process cover + one content page if not cached
+            # Normal mode: process first + one other page if not cached
             
-            # 1. Cover page (first file)
+            # 1. First image (often title/cover/complex layout)
             first_image = png_files[0]
             if first_image.name not in processed_images:
                 images_to_process.append(first_image)
-                print(f"Selected cover page: {first_image.name}")
+                print(f"Selected first image: {first_image.name}")
             else:
-                print(f"Cover page already cached: {first_image.name}")
+                print(f"First image already cached: {first_image.name}")
             
-            # 2. One content page from the rest
+            # 2. One additional page from the rest
             if len(processed_images) < 2 and len(png_files) > 1:
                 import random
                 remaining_files = [f for f in png_files[1:] if f.name not in processed_images]
                 if remaining_files:
-                    # Prefer content pages (with numbers)
+                    # Prefer numbered files (often content pages)
                     numbered_files = [f for f in remaining_files if any(c.isdigit() for c in f.name)]
                     if numbered_files:
-                        content_page = random.choice(numbered_files)
+                        additional_page = random.choice(numbered_files)
                     else:
-                        content_page = random.choice(remaining_files)
-                    images_to_process.append(content_page)
-                    print(f"Selected content page: {content_page.name}")
+                        additional_page = random.choice(remaining_files)
+                    images_to_process.append(additional_page)
+                    print(f"Selected additional page: {additional_page.name}")
         
         # Process selected images
         if images_to_process:
@@ -736,7 +785,7 @@ def main():
             
             for image_path in images_to_process:
                 print(f"\nProcessing {image_path.name}...")
-                result = process_image(str(image_path), force_reprocess=args.reprocess)
+                result = process_image(str(image_path), force_reprocess=args.reprocess, local_only=args.local_only)
                 if result:
                     print(f"  Success: {result['total_texts']} text elements found using {result['method']}")
                 else:
@@ -756,8 +805,10 @@ def main():
             print(f"  {name}: {data['method']}")
         print(f"\nCommands for next run:")
         print(f"   python hybrid_ocr_viewer.py --cache-only           (use cached results only)")
+        print(f"   python hybrid_ocr_viewer.py --local-only           (use only Tesseract, no AI)")
         print(f"   python hybrid_ocr_viewer.py --reprocess            (reprocess all images)")
         print(f"   python hybrid_ocr_viewer.py --content-page 033     (process specific page)")
+        print(f"   python hybrid_ocr_viewer.py --local-only --reprocess  (reprocess with local OCR only)")
         
         # Add processed_images to app context for templates
         app.jinja_env.globals['processed_images'] = processed_images
