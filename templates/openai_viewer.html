@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OpenAI Vision Text Extractor</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }
+        .container { max-width: 800px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; }
+        h1 { color: #333; text-align: center; }
+        .image-list { list-style: none; padding: 0; }
+        .image-item { 
+            background: #f9f9f9; 
+            margin: 10px 0; 
+            padding: 15px; 
+            border-radius: 5px; 
+            border-left: 4px solid #007bff;
+        }
+        .image-item a { text-decoration: none; color: #007bff; font-weight: bold; }
+        .image-item a:hover { color: #0056b3; }
+        .stats { color: #666; font-size: 0.9em; margin-top: 5px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>OpenAI Vision Text Extractor</h1>
+        <p>Interactive viewer for text extracted from images using OpenAI GPT-4V</p>
+        
+        {% if images %}
+        <h2>Processed Images:</h2>
+        <ul class="image-list">
+            {% for image in images %}
+            <li class="image-item">
+                <a href="/view/{{ image }}">{{ image }}</a>
+                <div class="stats">Click to view with interactive text overlays</div>
+            </li>
+            {% endfor %}
+        </ul>
+        {% else %}
+        <p>No images processed yet. Run the script to process images.</p>
+        {% endif %}
+    </div>
+</body>
+</html>

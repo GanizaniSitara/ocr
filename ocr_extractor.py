@@ -75,9 +75,8 @@ def extract_text_with_boxes(
         try:
             processed_img = preprocess_image(original_img.copy(), **config) if preprocess else original_img
             
-            # Use better OCR configuration
-            whitelist_chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.,!?;:()[]{}\"'-_@#$%&*+=/<>| "
-            ocr_config = f"--psm {psm} -c tessedit_char_whitelist={whitelist_chars}"
+            # Use optimal OCR configuration based on diagnostic results
+            ocr_config = "--psm 3 --oem 3"
             
             # Get detailed OCR data with bounding boxes
             data = pytesseract.image_to_data(

@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ image_name }} - OpenAI Vision Viewer</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background: #f0f0f0; }
+        .header { text-align: center; margin-bottom: 20px; }
+        .controls { text-align: center; margin-bottom: 15px; }
+        .toggle-btn {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            margin: 0 10px;
+        }
+        .toggle-btn:hover { background: #0056b3; }
+        .toggle-btn.active { background: #28a745; }
+        
+        .image-container {
+            position: relative;
+            display: inline-block;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            overflow: hidden;
+            background: white;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+            margin: 0 auto;
+            display: block;
+            max-width: 90vw;
+        }
+        
+        .main-image {
+            max-width: 100%;
+            height: auto;
+            display: block;
+        }
+        
+        .text-overlay {
+            position: absolute;
+            cursor: pointer;
+            padding: 2px 4px;
+            border-radius: 3px;
+            font-weight: bold;
+            text-shadow: 1px 1px 2px rgba(0,0,0,0.7);
+            transition: all 0.2s ease;
+            user-select: text;
+            z-index: 10;
+        }
+        
+        .text-overlay.size-small { font-size: 12px; }
+        .text-overlay.size-medium { font-size: 14px; }
+        .text-overlay.size-large { font-size: 18px; }
+        
+        .text-overlay.type-masthead { color: #ff0000; background: rgba(255,255,255,0.9); }
+        .text-overlay.type-headline { color: #ff6600; background: rgba(255,255,255,0.8); }
+        .text-overlay.type-speech_bubble { color: #0066ff; background: rgba(255,255,255,0.8); }
+        .text-overlay.type-caption { color: #009900; background: rgba(255,255,255,0.7); }
+        .text-overlay.type-price { color: #cc0099; background: rgba(255,255,255,0.7); }
+        .text-overlay.type-date { color: #666600; background: rgba(255,255,255,0.7); }
+        .text-overlay.type-other { color: #333333; background: rgba(255,255,255,0.6); }
+        
+        .text-overlay:hover {
+            background: rgba(255,255,0,0.9) !important;
+            color: #000 !important;
+            transform: scale(1.05);
+            z-index: 20;
+        }
+        
+        .text-overlay.hidden { display: none; }
+        
+        .sidebar {
+            position: fixed;
+            right: 20px;
+            top: 100px;
+            width: 300px;
+            background: white;
+            border-radius: 8px;
+            padding: 15px;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+            max-height: 70vh;
+            overflow-y: auto;
+        }
+        
+        .text-list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+        
+        .text-item {
+            padding: 8px;
+            margin: 5px 0;
+            background: #f9f9f9;
+            border-radius: 4px;
+            cursor: pointer;
+            border-left: 3px solid #007bff;
+        }
+        
+        .text-item:hover { background: #e9ecef; }
+        .text-item.selected { background: #d4edda; border-left-color: #28a745; }
+        
+        .back-link {
+            display: inline-block;
+            margin-bottom: 15px;
+            color: #007bff;
+            text-decoration: none;
+        }
+        
+        .stats {
+            color: #666;
+            font-size: 0.9em;
+            margin-bottom: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <a href="/" class="back-link">← Back to Image List</a>
+        <h1>{{ image_name }}</h1>
+        <div class="stats">{{ image_data.total_texts }} text elements detected by OpenAI GPT-4V</div>
+    </div>
+    
+    <div class="controls">
+        <button id="toggleOverlays" class="toggle-btn active">Hide Text Overlays</button>
+        <button id="toggleSidebar" class="toggle-btn">Toggle Sidebar</button>
+    </div>
+    
+    <div class="image-container">
+        <img src="/images/{{ image_name }}" class="main-image" id="mainImage" alt="{{ image_name }}">
+        <div id="textOverlays"></div>
+    </div>
+    
+    <div class="sidebar" id="sidebar">
+        <h3>Extracted Text</h3>
+        <div class="stats">Click any text to highlight on image</div>
+        <ul class="text-list" id="textList"></ul>
+    </div>
+
+    <script>
+        const imageData = {{ image_data.text_data | tojson }};
+        const overlaysContainer = document.getElementById('textOverlays');
+        const textList = document.getElementById('textList');
+        const toggleBtn = document.getElementById('toggleOverlays');
+        const sidebarBtn = document.getElementById('toggleSidebar');
+        const sidebar = document.getElementById('sidebar');
+        const mainImage = document.getElementById('mainImage');
+        
+        let overlaysVisible = true;
+        let sidebarVisible = true;
+        
+        function createOverlays() {
+            overlaysContainer.innerHTML = '';
+            textList.innerHTML = '';
+            
+            const imageRect = mainImage.getBoundingClientRect();
+            const containerRect = overlaysContainer.parentElement.getBoundingClientRect();
+            
+            imageData.forEach((item, index) => {
+                // Create overlay element
+                const overlay = document.createElement('div');
+                overlay.className = `text-overlay size-${item.size} type-${item.type}`;
+                overlay.textContent = item.text;
+                overlay.dataset.index = index;
+                
+                // Position based on percentages
+                const x = (item.x_percent / 100) * mainImage.clientWidth;
+                const y = (item.y_percent / 100) * mainImage.clientHeight;
+                
+                overlay.style.left = x + 'px';
+                overlay.style.top = y + 'px';
+                
+                overlay.addEventListener('click', () => selectText(index));
+                overlaysContainer.appendChild(overlay);
+                
+                // Create sidebar list item
+                const listItem = document.createElement('li');
+                listItem.className = 'text-item';
+                listItem.innerHTML = `
+                    <strong>${item.text}</strong><br>
+                    <small>${item.type} (${item.size})</small>
+                `;
+                listItem.dataset.index = index;
+                listItem.addEventListener('click', () => selectText(index));
+                textList.appendChild(listItem);
+            });
+        }
+        
+        function selectText(index) {
+            // Clear previous selections
+            document.querySelectorAll('.text-overlay, .text-item').forEach(el => {
+                el.classList.remove('selected');
+            });
+            
+            // Select current
+            const overlay = document.querySelector(`[data-index="${index}"]`);
+            if (overlay) {
+                overlay.classList.add('selected');
+                
+                // Copy text to clipboard
+                const text = imageData[index].text;
+                navigator.clipboard.writeText(text).then(() => {
+                    console.log('Copied to clipboard:', text);
+                }).catch(err => {
+                    console.log('Could not copy to clipboard');
+                });
+            }
+        }
+        
+        function toggleOverlays() {
+            overlaysVisible = !overlaysVisible;
+            const overlays = document.querySelectorAll('.text-overlay');
+            
+            overlays.forEach(overlay => {
+                overlay.classList.toggle('hidden', !overlaysVisible);
+            });
+            
+            toggleBtn.textContent = overlaysVisible ? 'Hide Text Overlays' : 'Show Text Overlays';
+            toggleBtn.classList.toggle('active', overlaysVisible);
+        }
+        
+        function toggleSidebar() {
+            sidebarVisible = !sidebarVisible;
+            sidebar.style.display = sidebarVisible ? 'block' : 'none';
+            sidebarBtn.textContent = sidebarVisible ? 'Hide Sidebar' : 'Show Sidebar';
+        }
+        
+        // Event listeners
+        toggleBtn.addEventListener('click', toggleOverlays);
+        sidebarBtn.addEventListener('click', toggleSidebar);
+        mainImage.addEventListener('load', createOverlays);
+        window.addEventListener('resize', createOverlays);
+        
+        // Initial setup
+        if (mainImage.complete) {
+            createOverlays();
+        }
+    </script>
+</body>
+</html>

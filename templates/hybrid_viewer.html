@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hybrid OCR Text Extractor</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }
+        .container { max-width: 800px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; }
+        h1 { color: #333; text-align: center; }
+        .subtitle { text-align: center; color: #666; margin-bottom: 30px; }
+        .image-list { list-style: none; padding: 0; }
+        .image-item { 
+            background: #f9f9f9; 
+            margin: 10px 0; 
+            padding: 15px; 
+            border-radius: 5px; 
+            border-left: 4px solid #007bff;
+        }
+        .image-item.openai { border-left-color: #28a745; }
+        .image-item.analytical { border-left-color: #ffc107; }
+        .image-item a { text-decoration: none; color: #007bff; font-weight: bold; }
+        .image-item a:hover { color: #0056b3; }
+        .stats { color: #666; font-size: 0.9em; margin-top: 5px; }
+        .method-tag { 
+            display: inline-block; 
+            padding: 2px 6px; 
+            border-radius: 3px; 
+            font-size: 0.8em; 
+            font-weight: bold; 
+        }
+        .method-openai { background: #d4edda; color: #155724; }
+        .method-analytical { background: #fff3cd; color: #856404; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Hybrid OCR Text Extractor</h1>
+        <div class="subtitle">OpenAI Vision for covers • Analytical OCR for content pages</div>
+        
+        {% if images %}
+        <h2>Processed Images:</h2>
+        <ul class="image-list">
+            {% for image in images %}
+            {% set data = processed_images[image] %}
+            <li class="image-item {{ data.method.replace('_', '-') }}">
+                <a href="/view/{{ image }}">{{ image }}</a>
+                <span class="method-tag method-{{ data.method.replace('_', '-') }}">
+                    {{ data.method.replace('_', ' ').title() }}
+                </span>
+                <div class="stats">
+                    {{ data.total_texts }} text elements • Click to view with interactive overlays
+                </div>
+            </li>
+            {% endfor %}
+        </ul>
+        {% else %}
+        <p>No images processed yet. Run the script to process images.</p>
+        {% endif %}
+    </div>
+</body>
+</html>
