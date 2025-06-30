@@ -1,4 +1,4 @@
-# PrivateEye Magazine Archive
+# Magazine Archive
 
 OCR-powered archiving solution for PrivateEye magazines with clickable text overlays.
 
